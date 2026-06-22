@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>SnapBooth – Modern Korean Photo Booth</title>
+  <meta name="description" content="Korean-style web photo booth: strip mode, 20+ frames, filters, gallery & download." />
+  <meta name="theme-color" content="#1a0829" />
+
+  <!-- React & Babel (CDN, no build step needed) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { background: #1a0829; }
+    @keyframes flashAnim  { 0%{opacity:.95} 100%{opacity:0} }
+    @keyframes fadeUp     { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes float      { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+    @keyframes pulseCount { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.7;transform:scale(1.08)} }
+    .fadeUp      { animation: fadeUp .6s ease both; }
+    .float       { animation: float 3s ease-in-out infinite; }
+    .pulse-count { animation: pulseCount .6s ease-in-out infinite; }
+    .btn-glow    { box-shadow:0 0 20px rgba(196,130,247,.5); transition:all .2s; }
+    .btn-glow:hover { box-shadow:0 0 35px rgba(196,130,247,.8); transform:translateY(-2px); }
+    .glass      { background:rgba(255,255,255,.08); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.15); }
+    .glass-dark { background:rgba(0,0,0,.3);        backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,.1); }
+    .frame-btn  { transition:transform .2s; }
+    .frame-btn:hover { transform:scale(1.05); }
+    ::-webkit-scrollbar { width:4px; height:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.2); border-radius:4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect, useCallback } = React;
+
+    /* ── DATA ─────────────────────────────────────────────────────────── */
+    const FRAMES = {
+      Minimalist: [
+        { id:"white",  label:"White Clean",    border:"8px solid #ffffff", bg:"#ffffff", text:"#333" },
+        { id:"black",  label:"Midnight Black", border:"8px solid #111111", bg:"#111111", text:"#fff" },
+        { id:"cream",  label:"Cream",          border:"8px solid #f5f0e8", bg:"#f5f0e8", text:"#555" },
+        { id:"gray",   label:"Stone Gray",     border:"8px solid #d1d5db", bg:"#e5e7eb", text:"#374151" },
+      ],
+      Pastel: [
+        { id:"pink",     label:"Pink Pastel", border:"8px solid #fbcfe8", bg:"#fce7f3", text:"#9d174d" },
+        { id:"blue",     label:"Baby Blue",   border:"8px solid #bfdbfe", bg:"#dbeafe", text:"#1e40af" },
+        { id:"lavender", label:"Lavender",    border:"8px solid #c4b5fd", bg:"#ede9fe", text:"#5b21b6" },
+        { id:"mint",     label:"Mint",        border:"8px solid #a7f3d0", bg:"#d1fae5", text:"#065f46" },
+      ],
+      "Korean Style": [
+        { id:"kwhite", label:"K-White",   border:"10px solid #fff",     bg:"#fff",    text:"#222" },
+        { id:"kpink",  label:"Soft Pink", border:"10px solid #fda4af",  bg:"#fff1f2", text:"#881337" },
+        { id:"kbeige", label:"Beige",     border:"10px solid #e7d9c7",  bg:"#fdf8f0", text:"#78350f" },
+        { id:"ksky",   label:"Sky Blue",  border:"10px solid #7dd3fc",  bg:"#f0f9ff", text:"#0c4a6e" },
+      ],
+      Birthday: [
+        { id:"bday",    label:"🎂 Cake",     border:"8px dashed #f472b6", bg:"#fdf2f8", text:"#9d174d" },
+        { id:"balloon", label:"🎈 Balloon",  border:"8px solid #fb923c",  bg:"#fff7ed", text:"#9a3412" },
+        { id:"confetti",label:"🎉 Confetti", border:"8px dotted #a855f7", bg:"#faf5ff", text:"#581c87" },
+        { id:"rainbow", label:"🌈 Rainbow",  border:"8px solid #f472b6",  bg:"#fdf4ff", text:"#333" },
+      ],
+      Romantic: [
+        { id:"love",   label:"❤️ Love",      border:"8px solid #f43f5e", bg:"#fff1f2", text:"#9f1239" },
+        { id:"rose",   label:"🌹 Rose",      border:"8px solid #e11d48", bg:"#fce7f3", text:"#9d174d" },
+        { id:"heart",  label:"💕 Soft Heart",border:"8px solid #fb7185", bg:"#fff5f7", text:"#be123c" },
+        { id:"velvet", label:"🪷 Velvet",    border:"8px solid #a21caf", bg:"#fdf4ff", text:"#701a75" },
+      ],
+      Neon: [
+        { id:"cyber",      label:"⚡ Cyberpunk",  border:"8px solid #facc15", bg:"#0a0a0a", text:"#facc15" },
+        { id:"neonpurple", label:"💜 Purple Neon",border:"8px solid #a855f7", bg:"#0f0a1e", text:"#d8b4fe" },
+        { id:"neonblue",   label:"💙 Blue Neon",  border:"8px solid #38bdf8", bg:"#030712", text:"#7dd3fc" },
+        { id:"neongreen",  label:"💚 Green Neon", border:"8px solid #4ade80", bg:"#011007", text:"#86efac" },
+      ],
+      Graduation: [
+        { id:"grad",   label:"🎓 Gold & Navy", border:"8px solid #ca8a04", bg:"#fefce8", text:"#713f12" },
+        { id:"school", label:"📚 School",      border:"8px solid #1d4ed8", bg:"#eff6ff", text:"#1e3a8a" },
+      ],
+      Anime: [
+        { id:"sakura", label:"🌸 Sakura",    border:"8px solid #f9a8d4", bg:"#fdf2f8", text:"#831843" },
+        { id:"kawaii", label:"✨ Kawaii",    border:"8px solid #c084fc", bg:"#faf5ff", text:"#581c87" },
+        { id:"sky",    label:"☁️ Sky Anime", border:"8px solid #7dd3fc", bg:"#f0f9ff", text:"#0c4a6e" },
+      ],
+      Friendship: [
+        { id:"bestfriend", label:"👯 Best Friend",    border:"8px solid #fbbf24", bg:"#fffbeb", text:"#92400e" },
+        { id:"memories",   label:"📷 Memories",       border:"8px solid #6ee7b7", bg:"#ecfdf5", text:"#065f46" },
+        { id:"funday",     label:"🎊 Fun Day",         border:"8px dotted #f97316",bg:"#fff7ed", text:"#9a3412" },
+      ],
+      Eid: [
+        { id:"islamic", label:"🌙 Islamic",   border:"8px solid #ca8a04", bg:"#fefce8", text:"#713f12" },
+        { id:"gold",    label:"✨ Gold Theme",border:"8px solid #d97706", bg:"#fffbeb", text:"#92400e" },
+      ],
+    };
+
+    const FILTERS = [
+      { id:"none",    label:"Original",  css:"none" },
+      { id:"vintage", label:"Vintage",   css:"sepia(0.5) contrast(1.1) brightness(0.9)" },
+      { id:"retro",   label:"Retro",     css:"sepia(0.8) saturate(0.7) hue-rotate(10deg)" },
+      { id:"warm",    label:"Warm",      css:"sepia(0.2) saturate(1.4) brightness(1.05) hue-rotate(-10deg)" },
+      { id:"cool",    label:"Cool",      css:"saturate(0.9) hue-rotate(20deg) brightness(1.05)" },
+      { id:"bw",      label:"B&W",       css:"grayscale(1) contrast(1.1)" },
+      { id:"glow",    label:"Soft Glow", css:"brightness(1.15) saturate(1.2) contrast(0.9)" },
+      { id:"vivid",   label:"Vivid",     css:"saturate(1.6) contrast(1.1)" },
+    ];
+
+    const PHOTO_MODES = [
+      { id:1, label:"Single",       icon:"▪",    desc:"1 foto" },
+      { id:2, label:"Double",       icon:"▪▪",   desc:"2 foto" },
+      { id:3, label:"Triple",       icon:"▪▪▪",  desc:"3 foto" },
+      { id:4, label:"Classic Strip",icon:"▪▪▪▪", desc:"4 foto" },
+    ];
+
+    const COUNTDOWN_OPTIONS = [3, 5, 10];
+
+    /* ── MAIN APP ─────────────────────────────────────────────────────── */
+    function App() {
+      const [screen, setScreen]               = useState("welcome");
+      const [photos, setPhotos]               = useState([]);
+      const [session, setSession]             = useState([]);
+      const [photoMode, setPhotoMode]         = useState(4);
+      const [frame, setFrame]                 = useState(FRAMES["Korean Style"][0]);
+      const [filter, setFilter]               = useState(FILTERS[0]);
+      const [countdown, setCountdown]         = useState(3);
+      const [facingMode, setFacingMode]       = useState("user");
+      const [countdownActive, setCountdownActive] = useState(false);
+      const [countdownVal, setCountdownVal]   = useState(null);
+      const [flash, setFlash]                 = useState(false);
+      const [captureIndex, setCaptureIndex]   = useState(0);
+      const [frameCategory, setFrameCategory] = useState("Korean Style");
+      const [customText, setCustomText]       = useState("");
+
+      const videoRef  = useRef(null);
+      const canvasRef = useRef(null);
+      const streamRef = useRef(null);
+
+      const startCamera = useCallback(async (mode) => {
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode: mode }, audio:false });
+          streamRef.current = s;
+          if (videoRef.current) videoRef.current.srcObject = s;
+        } catch(e) { alert("Tidak dapat mengakses kamera: " + e.message); }
+      }, []);
+
+      useEffect(() => {
+        if (screen === "camera") startCamera(facingMode);
+        return () => { if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); };
+      }, [screen, facingMode]);
+
+      const switchCamera = () => setFacingMode(m => m === "user" ? "environment" : "user");
+
+      const capturePhoto = useCallback(() => {
+        const video  = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return null;
+        canvas.width  = video.videoWidth  || 640;
+        canvas.height = video.videoHeight || 480;
+        const ctx = canvas.getContext("2d");
+        if (facingMode === "user") { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+        if (filter.css !== "none") ctx.filter = filter.css;
+        ctx.drawImage(video, 0, 0);
+        return canvas.toDataURL("image/png");
+      }, [facingMode, filter]);
+
+      const triggerCapture = useCallback(async () => {
+        if (countdownActive) return;
+        setCountdownActive(true);
+        const newSession = [...session];
+        for (let i = captureIndex; i < photoMode; i++) {
+          for (let c = countdown; c > 0; c--) {
+            setCountdownVal(c);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          setCountdownVal(null);
+          setFlash(true);
+          await new Promise(r => setTimeout(r, 150));
+          setFlash(false);
+          const img = capturePhoto();
+          if (img) newSession.push(img);
+          setSession([...newSession]);
+          setCaptureIndex(i + 1);
+          if (i < photoMode - 1) await new Promise(r => setTimeout(r, 700));
+        }
+        setCountdownActive(false);
+        if (newSession.length >= photoMode) {
+          streamRef.current?.getTracks().forEach(t => t.stop());
+          setScreen("preview");
+        }
+      }, [countdownActive, photoMode, captureIndex, countdown, capturePhoto, session]);
+
+      const resetSession = () => { setSession([]); setCaptureIndex(0); setScreen("camera"); };
+
+      const saveToGallery = () => {
+        const entry = { id:Date.now(), photos:session, frame, filter, text:customText, mode:photoMode, date:new Date() };
+        setPhotos(p => [entry, ...p]);
+        setSession([]); setCaptureIndex(0); setCustomText("");
+        setScreen("gallery");
+      };
+
+      return (
+        <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1a0829 0%,#2d1b4e 40%,#1a2744 100%)", fontFamily:"'Segoe UI',system-ui,sans-serif", color:"#fff", overflowX:"hidden" }}>
+          <canvas ref={canvasRef} style={{ display:"none" }} />
+          {flash && <div style={{ position:"fixed", inset:0, background:"#fff", zIndex:9999, animation:"flashAnim .25s ease-out forwards" }} />}
+
+          {screen === "welcome" && <WelcomeScreen setScreen={setScreen} photos={photos} />}
+          {screen === "camera"  && (
+            <CameraScreen
+              videoRef={videoRef} facingMode={facingMode} switchCamera={switchCamera}
+              photoMode={photoMode} setPhotoMode={setPhotoMode}
+              countdown={countdown} setCountdown={setCountdown}
+              countdownVal={countdownVal} countdownActive={countdownActive}
+              session={session} captureIndex={captureIndex}
+              triggerCapture={triggerCapture}
+              filter={filter} setFilter={setFilter}
+              setScreen={setScreen}
+              frame={frame} setFrame={setFrame}
+              frameCategory={frameCategory} setFrameCategory={setFrameCategory}
+            />
+          )}
+          {screen === "preview" && (
+            <PreviewScreen
+              session={session} frame={frame} filter={filter}
+              photoMode={photoMode} customText={customText} setCustomText={setCustomText}
+              saveToGallery={saveToGallery} resetSession={resetSession}
+              setFrame={setFrame} frameCategory={frameCategory} setFrameCategory={setFrameCategory}
+              setFilter={setFilter}
+            />
+          )}
+          {screen === "gallery" && (
+            <GalleryScreen photos={photos} setPhotos={setPhotos} setScreen={setScreen} />
+          )}
+        </div>
+      );
+    }
+
+    /* ── WELCOME ──────────────────────────────────────────────────────── */
+    function WelcomeScreen({ setScreen, photos }) {
+      const orbs = [
+        { top:"10%", left:"10%",  color:"#c084fc44", size:300 },
+        { top:"55%", right:"8%",  color:"#fb718544", size:220 },
+        { top:"25%", right:"20%", color:"#38bdf844", size:170 },
+      ];
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, position:"relative", overflow:"hidden" }}>
+          {orbs.map((o,i) => (
+            <div key={i} style={{ position:"absolute", top:o.top, left:o.left, right:o.right, width:o.size, height:o.size, borderRadius:"50%", background:o.color, filter:"blur(70px)", animation:`float ${3+i}s ease-in-out infinite`, animationDelay:`${i*.8}s`, pointerEvents:"none" }} />
+          ))}
+          <div className="fadeUp" style={{ textAlign:"center", zIndex:1, maxWidth:400, width:"100%" }}>
+            <div className="float" style={{ fontSize:72, lineHeight:1, marginBottom:8 }}>📸</div>
+            <div style={{ fontSize:12, letterSpacing:"0.3em", color:"#c084fc", fontWeight:700, textTransform:"uppercase", marginBottom:10 }}>✦ MODERN PHOTO BOOTH ✦</div>
+            <h1 style={{ fontSize:"clamp(38px,10vw,68px)", fontWeight:900, lineHeight:1.05, marginBottom:10, background:"linear-gradient(135deg,#f9a8d4,#c084fc,#7dd3fc)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+              SnapBooth
+            </h1>
+            <p style={{ color:"rgba(255,255,255,.55)", fontSize:15, margin:"0 auto 36px", maxWidth:280 }}>
+              Korean-style photo booth · capture &amp; create ✨
+            </p>
+            <div style={{ display:"flex", flexDirection:"column", gap:12, maxWidth:270, margin:"0 auto" }}>
+              <button className="btn-glow" onClick={() => setScreen("camera")}
+                style={{ padding:"15px 32px", borderRadius:50, background:"linear-gradient(135deg,#c084fc,#fb7185)", border:"none", color:"#fff", fontSize:16, fontWeight:700, cursor:"pointer", letterSpacing:".05em" }}>
+                📷 Mulai Foto
+              </button>
+              <button onClick={() => setScreen("gallery")}
+                style={{ padding:"13px 32px", borderRadius:50, background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.25)", color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer", backdropFilter:"blur(8px)" }}>
+                🖼 Galeri Hasil {photos.length > 0 && `(${photos.length})`}
+              </button>
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center", marginTop:36, maxWidth:360 }}>
+              {["🎞 Strip Mode","✨ 20+ Frames","🎨 8 Filters","💾 Gallery","📥 Download"].map(f => (
+                <span key={f} style={{ padding:"5px 12px", borderRadius:20, background:"rgba(255,255,255,.07)", border:"1px solid rgba(255,255,255,.12)", fontSize:11, color:"rgba(255,255,255,.65)" }}>{f}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── CAMERA ───────────────────────────────────────────────────────── */
+    function CameraScreen({ videoRef, facingMode, switchCamera, photoMode, setPhotoMode, countdown, setCountdown, countdownVal, countdownActive, session, captureIndex, triggerCapture, filter, setFilter, setScreen, frame, setFrame, frameCategory, setFrameCategory }) {
+      const [tab, setTab] = useState("mode");
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column" }}>
+          {/* Header */}
+          <div className="glass-dark" style={{ display:"flex", alignItems:"center", padding:"12px 16px", gap:12 }}>
+            <button onClick={() => setScreen("welcome")} style={{ background:"none", border:"none", color:"#fff", fontSize:22, cursor:"pointer", padding:"2px 8px", lineHeight:1 }}>←</button>
+            <div style={{ flex:1, textAlign:"center", fontWeight:700, fontSize:15, color:"#c084fc" }}>📷 Kamera</div>
+            <button onClick={switchCamera} style={{ background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.2)", color:"#fff", padding:"6px 10px", borderRadius:8, cursor:"pointer", fontSize:16 }}>🔄</button>
+          </div>
+
+          {/* Viewfinder */}
+          <div style={{ position:"relative", background:"#000", display:"flex", justifyContent:"center", overflow:"hidden" }}>
+            <video ref={videoRef} autoPlay playsInline muted
+              style={{ width:"100%", maxWidth:520, aspectRatio:"3/4", objectFit:"cover", display:"block", transform:facingMode==="user"?"scaleX(-1)":"none", filter:filter.css!=="none"?filter.css:undefined }} />
+            {countdownVal !== null && (
+              <div className="pulse-count" style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,.55)", fontSize:110, fontWeight:900, color:"#fff" }}>
+                {countdownVal}
+              </div>
+            )}
+            {/* Strip thumbnails */}
+            <div style={{ position:"absolute", top:10, right:10, display:"flex", flexDirection:"column", gap:5 }}>
+              {Array.from({ length:photoMode }).map((_,i) => (
+                <div key={i} style={{ width:38, height:30, borderRadius:4, border:"2px solid rgba(255,255,255,.5)", background:session[i]?`url(${session[i]}) center/cover`:"rgba(0,0,0,.45)", overflow:"hidden" }}>
+                  {i===captureIndex && !session[i] && <div style={{ width:"100%", height:"100%", background:"rgba(196,130,247,.6)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>▶</div>}
+                </div>
+              ))}
+            </div>
+            {/* Frame overlay */}
+            <div style={{ position:"absolute", inset:0, pointerEvents:"none", border:frame.border, boxSizing:"border-box", opacity:.35 }} />
+          </div>
+
+          {/* Panel */}
+          <div className="glass-dark" style={{ flex:1, borderTop:"1px solid rgba(255,255,255,.1)", padding:"0 16px", display:"flex", flexDirection:"column" }}>
+            {/* Tab bar */}
+            <div style={{ display:"flex", gap:4, padding:"8px 0" }}>
+              {[["mode","🎞 Mode"],["frame","🖼 Frame"],["filter","🎨 Filter"]].map(([id,label]) => (
+                <button key={id} onClick={() => setTab(id)}
+                  style={{ flex:1, padding:"8px 4px", borderRadius:8, background:tab===id?"rgba(196,130,247,.25)":"transparent", border:`1px solid ${tab===id?"#c084fc":"transparent"}`, color:tab===id?"#c084fc":"rgba(255,255,255,.55)", fontSize:12, fontWeight:600, cursor:"pointer", transition:"all .2s" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Mode tab */}
+            {tab==="mode" && (
+              <div style={{ paddingBottom:12 }}>
+                <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+                  {PHOTO_MODES.map(m => (
+                    <button key={m.id} onClick={() => setPhotoMode(m.id)}
+                      style={{ flex:1, padding:"9px 4px", borderRadius:10, background:photoMode===m.id?"linear-gradient(135deg,#c084fc,#fb7185)":"rgba(255,255,255,.08)", border:`1px solid ${photoMode===m.id?"transparent":"rgba(255,255,255,.15)"}`, color:"#fff", fontSize:11, fontWeight:600, cursor:"pointer", transition:"all .2s" }}>
+                      <div style={{ fontSize:7, marginBottom:3, letterSpacing:2 }}>{m.icon}</div>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:13, color:"rgba(255,255,255,.45)" }}>⏱</span>
+                  {COUNTDOWN_OPTIONS.map(s => (
+                    <button key={s} onClick={() => setCountdown(s)}
+                      style={{ padding:"6px 16px", borderRadius:20, background:countdown===s?"#c084fc":"rgba(255,255,255,.08)", border:"none", color:"#fff", fontSize:12, fontWeight:600, cursor:"pointer", transition:"background .2s" }}>
+                      {s}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Frame tab */}
+            {tab==="frame" && (
+              <div style={{ paddingBottom:12 }}>
+                <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:8 }}>
+                  {Object.keys(FRAMES).map(cat => (
+                    <button key={cat} onClick={() => setFrameCategory(cat)}
+                      style={{ padding:"5px 12px", borderRadius:20, whiteSpace:"nowrap", background:frameCategory===cat?"#c084fc":"rgba(255,255,255,.08)", border:"none", color:"#fff", fontSize:11, fontWeight:600, cursor:"pointer", flexShrink:0 }}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:4 }}>
+                  {FRAMES[frameCategory].map(f => (
+                    <button key={f.id} className="frame-btn" onClick={() => setFrame(f)}
+                      style={{ width:56, height:56, flexShrink:0, borderRadius:10, border:frame.id===f.id?"2px solid #c084fc":"2px solid rgba(255,255,255,.12)", background:f.bg||"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <div style={{ width:"78%", height:"78%", border:f.border, borderRadius:3, boxSizing:"border-box" }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Filter tab */}
+            {tab==="filter" && (
+              <div style={{ paddingBottom:12 }}>
+                <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:4 }}>
+                  {FILTERS.map(f => (
+                    <button key={f.id} onClick={() => setFilter(f)}
+                      style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", padding:4 }}>
+                      <div style={{ width:52, height:52, borderRadius:10, background:"linear-gradient(135deg,#a78bfa,#f9a8d4)", filter:f.css!=="none"?f.css:undefined, border:filter.id===f.id?"2px solid #c084fc":"2px solid transparent", boxSizing:"border-box", transition:"all .2s" }} />
+                      <span style={{ fontSize:10, color:filter.id===f.id?"#c084fc":"rgba(255,255,255,.5)", fontWeight:600, whiteSpace:"nowrap" }}>{f.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Shutter */}
+          <div style={{ padding:"14px 16px", display:"flex", justifyContent:"center", background:"rgba(0,0,0,.3)" }}>
+            <button onClick={triggerCapture} disabled={countdownActive}
+              style={{ width:74, height:74, borderRadius:"50%", background:countdownActive?"rgba(255,255,255,.15)":"linear-gradient(135deg,#c084fc,#fb7185)", border:"4px solid rgba(255,255,255,.4)", cursor:countdownActive?"not-allowed":"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, boxShadow:countdownActive?"none":"0 0 30px rgba(196,130,247,.6)", transition:"all .2s" }}>
+              {countdownActive ? "⏳" : "📷"}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── PHOTO STRIP COMPONENT ────────────────────────────────────────── */
+    function PhotoStrip({ session, frame, filter, photoMode, customText }) {
+      const bg = frame.bg || "#fff";
+      return (
+        <div style={{ display:"inline-block", background:bg, padding:photoMode>1?10:8, borderRadius:8, maxWidth:photoMode>1?210:270 }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:photoMode>1?6:0 }}>
+            {session.slice(0, photoMode).map((img,i) => (
+              <div key={i} style={{ borderRadius:3, overflow:"hidden", lineHeight:0, border:frame.border }}>
+                <img src={img} alt={`foto-${i+1}`} style={{ width:"100%", display:"block", filter:filter.css!=="none"?filter.css:undefined }} />
+              </div>
+            ))}
+          </div>
+          {customText && (
+            <div style={{ textAlign:"center", marginTop:8, fontSize:11, fontWeight:700, color:frame.text||"#333", letterSpacing:".1em" }}>
+              {customText}
+            </div>
+          )}
+          <div style={{ textAlign:"center", marginTop:4, fontSize:9, color:(frame.text||"#333")+"99", letterSpacing:".18em" }}>
+            ✦ SNAPBOOTH ✦
+          </div>
+        </div>
+      );
+    }
+
+    /* ── PREVIEW ──────────────────────────────────────────────────────── */
+    function PreviewScreen({ session, frame, filter, photoMode, customText, setCustomText, saveToGallery, resetSession, setFrame, frameCategory, setFrameCategory, setFilter }) {
+      const [tab, setTab] = useState("frame");
+
+      const downloadComposite = useCallback(() => {
+        const W = 420, pad = 20, gap = 8, bw = 4;
+        const imgH = Math.round((W - pad*2) * 0.75);
+        const totalH = pad*2 + photoMode*imgH + (photoMode-1)*gap + 44;
+        const c = document.createElement("canvas");
+        c.width = W; c.height = totalH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = frame.bg || "#fff";
+        ctx.fillRect(0, 0, W, totalH);
+
+        const drawAll = (imgs, idx) => {
+          if (idx >= imgs.length) {
+            if (customText) {
+              ctx.fillStyle = frame.text||"#333";
+              ctx.font = "bold 16px sans-serif";
+              ctx.textAlign = "center";
+              ctx.fillText(customText, W/2, totalH-26);
+            }
+            ctx.fillStyle = (frame.text||"#333")+"77";
+            ctx.font = "10px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("✦ SNAPBOOTH ✦", W/2, totalH-8);
+            const a = document.createElement("a");
+            a.href = c.toDataURL("image/png");
+            a.download = `snapbooth-${Date.now()}.png`;
+            a.click();
+            return;
+          }
+          const img = new Image();
+          img.onload = () => {
+            const y = pad + idx*(imgH+gap);
+            if (filter.css!=="none") ctx.filter = filter.css;
+            ctx.drawImage(img, pad, y, W-pad*2, imgH);
+            ctx.filter = "none";
+            const bc = (frame.border||"").match(/#[0-9a-fA-F]{3,6}/)?.[0]||"#ccc";
+            ctx.strokeStyle = bc; ctx.lineWidth = bw;
+            ctx.strokeRect(pad, y, W-pad*2, imgH);
+            drawAll(imgs, idx+1);
+          };
+          img.src = imgs[idx];
+        };
+        drawAll(session.slice(0, photoMode), 0);
+      }, [session, frame, filter, photoMode, customText]);
+
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column" }}>
+          <div className="glass-dark" style={{ display:"flex", alignItems:"center", padding:"12px 16px", gap:12 }}>
+            <button onClick={resetSession} style={{ background:"none", border:"none", color:"#fff", fontSize:22, cursor:"pointer", lineHeight:1 }}>←</button>
+            <div style={{ flex:1, textAlign:"center", fontWeight:700, fontSize:15, color:"#c084fc" }}>✨ Preview</div>
+            <button onClick={saveToGallery} style={{ background:"linear-gradient(135deg,#c084fc,#fb7185)", border:"none", color:"#fff", padding:"8px 16px", borderRadius:20, fontWeight:700, cursor:"pointer", fontSize:13 }}>💾 Simpan</button>
+          </div>
+
+          <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:"20px 16px", overflowY:"auto" }}>
+            <PhotoStrip session={session} frame={frame} filter={filter} photoMode={photoMode} customText={customText} />
+          </div>
+
+          <div className="glass-dark" style={{ borderTop:"1px solid rgba(255,255,255,.1)", padding:"0 16px" }}>
+            <div style={{ display:"flex", gap:4, padding:"8px 0" }}>
+              {[["frame","🖼 Frame"],["filter","🎨 Filter"],["text","✏️ Teks"]].map(([id,label]) => (
+                <button key={id} onClick={() => setTab(id)}
+                  style={{ flex:1, padding:"8px 4px", borderRadius:8, background:tab===id?"rgba(196,130,247,.25)":"transparent", border:`1px solid ${tab===id?"#c084fc":"transparent"}`, color:tab===id?"#c084fc":"rgba(255,255,255,.55)", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {tab==="frame" && (
+              <div style={{ paddingBottom:12 }}>
+                <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:8 }}>
+                  {Object.keys(FRAMES).map(cat => (
+                    <button key={cat} onClick={() => setFrameCategory(cat)}
+                      style={{ padding:"5px 12px", borderRadius:20, whiteSpace:"nowrap", background:frameCategory===cat?"#c084fc":"rgba(255,255,255,.08)", border:"none", color:"#fff", fontSize:11, fontWeight:600, cursor:"pointer", flexShrink:0 }}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:4 }}>
+                  {FRAMES[frameCategory].map(f => (
+                    <button key={f.id} className="frame-btn" onClick={() => setFrame(f)}
+                      style={{ width:56, height:56, flexShrink:0, borderRadius:10, border:frame.id===f.id?"2px solid #c084fc":"2px solid rgba(255,255,255,.1)", background:f.bg||"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                      <div style={{ width:"78%", height:"78%", border:f.border, borderRadius:3, boxSizing:"border-box" }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab==="filter" && (
+              <div style={{ paddingBottom:12 }}>
+                <div style={{ display:"flex", gap:8, overflowX:"auto", paddingBottom:4 }}>
+                  {FILTERS.map(f => (
+                    <button key={f.id} onClick={() => setFilter(f)}
+                      style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", padding:4 }}>
+                      <div style={{ width:52, height:52, borderRadius:10, background:"linear-gradient(135deg,#a78bfa,#f9a8d4)", filter:f.css!=="none"?f.css:undefined, border:filter.id===f.id?"2px solid #c084fc":"2px solid transparent", boxSizing:"border-box" }} />
+                      <span style={{ fontSize:10, color:filter.id===f.id?"#c084fc":"rgba(255,255,255,.5)", fontWeight:600, whiteSpace:"nowrap" }}>{f.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab==="text" && (
+              <div style={{ paddingBottom:12 }}>
+                <input value={customText} onChange={e => setCustomText(e.target.value)} placeholder="Tambahkan caption... (nama, tanggal, quotes)"
+                  style={{ width:"100%", padding:"10px 14px", borderRadius:10, background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.2)", color:"#fff", fontSize:14, outline:"none" }} />
+                <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+                  {["Best Day Ever ✨","Happy Birthday! 🎂","Friends Forever 💕", new Date().toLocaleDateString("id-ID")].map(t => (
+                    <button key={t} onClick={() => setCustomText(t)}
+                      style={{ padding:"5px 10px", borderRadius:20, background:"rgba(255,255,255,.08)", border:"1px solid rgba(255,255,255,.15)", color:"rgba(255,255,255,.7)", fontSize:11, cursor:"pointer" }}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display:"flex", gap:10, padding:"12px 16px", background:"rgba(0,0,0,.3)" }}>
+            <button onClick={resetSession}
+              style={{ flex:1, padding:12, borderRadius:12, background:"rgba(255,255,255,.08)", border:"1px solid rgba(255,255,255,.15)", color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+              🔄 Ambil Ulang
+            </button>
+            <button onClick={downloadComposite}
+              style={{ flex:1, padding:12, borderRadius:12, background:"linear-gradient(135deg,#c084fc,#fb7185)", border:"none", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer" }}>
+              📥 Download
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── GALLERY ──────────────────────────────────────────────────────── */
+    function GalleryScreen({ photos, setPhotos, setScreen }) {
+      const [selected, setSelected] = useState(null);
+
+      const deletePhoto = id => { setPhotos(p => p.filter(x => x.id !== id)); setSelected(null); };
+
+      const downloadEntry = entry => {
+        // Rebuild composite for gallery download too
+        const W = 420, pad = 20, gap = 8, bw = 4;
+        const imgH = Math.round((W-pad*2)*.75);
+        const totalH = pad*2 + entry.mode*imgH + (entry.mode-1)*gap + 44;
+        const c = document.createElement("canvas");
+        c.width = W; c.height = totalH;
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = entry.frame.bg||"#fff";
+        ctx.fillRect(0,0,W,totalH);
+        const draw = (imgs,idx) => {
+          if (idx>=imgs.length) {
+            if (entry.text) {
+              ctx.fillStyle=entry.frame.text||"#333"; ctx.font="bold 16px sans-serif"; ctx.textAlign="center";
+              ctx.fillText(entry.text,W/2,totalH-26);
+            }
+            ctx.fillStyle=(entry.frame.text||"#333")+"77"; ctx.font="10px sans-serif"; ctx.textAlign="center";
+            ctx.fillText("✦ SNAPBOOTH ✦",W/2,totalH-8);
+            const a=document.createElement("a"); a.href=c.toDataURL("image/png"); a.download=`snapbooth-${entry.id}.png`; a.click(); return;
+          }
+          const img=new Image();
+          img.onload=()=>{
+            const y=pad+idx*(imgH+gap);
+            if(entry.filter.css!=="none") ctx.filter=entry.filter.css;
+            ctx.drawImage(img,pad,y,W-pad*2,imgH); ctx.filter="none";
+            const bc=(entry.frame.border||"").match(/#[0-9a-fA-F]{3,6}/)?.[0]||"#ccc";
+            ctx.strokeStyle=bc; ctx.lineWidth=bw; ctx.strokeRect(pad,y,W-pad*2,imgH);
+            draw(imgs,idx+1);
+          };
+          img.src=imgs[idx];
+        };
+        draw(entry.photos.slice(0,entry.mode),0);
+      };
+
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column" }}>
+          <div className="glass-dark" style={{ display:"flex", alignItems:"center", padding:"12px 16px", gap:12 }}>
+            <button onClick={() => setScreen("welcome")} style={{ background:"none", border:"none", color:"#fff", fontSize:22, cursor:"pointer", lineHeight:1 }}>←</button>
+            <div style={{ flex:1, textAlign:"center", fontWeight:700, fontSize:15, color:"#c084fc" }}>🖼 Galeri ({photos.length})</div>
+            <button onClick={() => setScreen("camera")} style={{ background:"linear-gradient(135deg,#c084fc,#fb7185)", border:"none", color:"#fff", padding:"8px 14px", borderRadius:20, fontWeight:700, cursor:"pointer", fontSize:13 }}>+ Foto</button>
+          </div>
+
+          {photos.length === 0 ? (
+            <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:14, opacity:.5 }}>
+              <div style={{ fontSize:56 }}>📭</div>
+              <p style={{ fontSize:15 }}>Belum ada foto tersimpan</p>
+              <button onClick={() => setScreen("camera")} style={{ padding:"10px 24px", borderRadius:20, background:"#c084fc", border:"none", color:"#fff", fontWeight:700, cursor:"pointer" }}>Mulai Foto</button>
+            </div>
+          ) : (
+            <div style={{ flex:1, overflowY:"auto", padding:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:12 }}>
+                {photos.map(entry => (
+                  <div key={entry.id} onClick={() => setSelected(entry)}
+                    style={{ borderRadius:12, overflow:"hidden", cursor:"pointer", background:entry.frame.bg||"#fff", border:"1px solid rgba(255,255,255,.12)", transition:"transform .2s" }}
+                    onMouseEnter={e => e.currentTarget.style.transform="scale(1.03)"}
+                    onMouseLeave={e => e.currentTarget.style.transform="scale(1)"}>
+                    <div style={{ padding:8 }}>
+                      {entry.photos.slice(0, Math.min(entry.mode,2)).map((img,i) => (
+                        <img key={i} src={img} alt="" style={{ width:"100%", display:"block", borderRadius:3, marginBottom:i<1&&entry.mode>1?4:0, filter:entry.filter.css!=="none"?entry.filter.css:undefined, border:entry.frame.border }} />
+                      ))}
+                    </div>
+                    <div style={{ padding:"2px 8px 8px", textAlign:"center", fontSize:10, color:(entry.frame.text||"#333")+"aa", fontWeight:600 }}>
+                      {entry.date.toLocaleDateString("id-ID",{day:"numeric",month:"short"})} · {entry.mode} foto
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selected && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.88)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100, padding:20 }}
+              onClick={() => setSelected(null)}>
+              <div onClick={e => e.stopPropagation()} style={{ maxWidth:330, width:"100%", borderRadius:16, overflow:"hidden", background:selected.frame.bg||"#fff" }}>
+                <div style={{ padding:12 }}>
+                  {selected.photos.slice(0, selected.mode).map((img,i) => (
+                    <img key={i} src={img} alt="" style={{ width:"100%", borderRadius:3, display:"block", marginBottom:i<selected.mode-1?6:0, filter:selected.filter.css!=="none"?selected.filter.css:undefined, border:selected.frame.border }} />
+                  ))}
+                  {selected.text && <div style={{ textAlign:"center", padding:"6px 0 2px", fontSize:12, fontWeight:700, color:selected.frame.text||"#333" }}>{selected.text}</div>}
+                  <div style={{ textAlign:"center", fontSize:9, color:(selected.frame.text||"#333")+"77" }}>✦ SNAPBOOTH ✦</div>
+                </div>
+                <div style={{ display:"flex", gap:8, padding:"0 12px 12px" }}>
+                  <button onClick={() => downloadEntry(selected)}
+                    style={{ flex:1, padding:10, borderRadius:10, background:"#c084fc", border:"none", color:"#fff", fontWeight:700, cursor:"pointer", fontSize:13 }}>
+                    📥 Download
+                  </button>
+                  <button onClick={() => deletePhoto(selected.id)}
+                    style={{ padding:"10px 16px", borderRadius:10, background:"#f43f5e", border:"none", color:"#fff", fontWeight:700, cursor:"pointer", fontSize:13 }}>
+                    🗑
+                  </button>
+                </div>
+              </div>
+              <button onClick={() => setSelected(null)}
+                style={{ marginTop:14, background:"none", border:"1px solid rgba(255,255,255,.3)", color:"#fff", padding:"8px 24px", borderRadius:20, cursor:"pointer", fontSize:14 }}>
+                Tutup
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ── MOUNT ────────────────────────────────────────────────────────── */
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
